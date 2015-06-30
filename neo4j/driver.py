@@ -232,6 +232,8 @@ class SessionV1(object):
     def __init__(self, s, **config):
         self.socket = s
         self._recv_buffer = b""
+        from collections import deque
+        self._data = deque([None] * 20)
         self.init("neo4j-python/0.0")
         if config.get("bench"):
             self._bench = []
@@ -305,6 +307,8 @@ class SessionV1(object):
 
             # Split off the amount of data required and keep the rest in the buffer
             data, self._recv_buffer = self._recv_buffer[:size], self._recv_buffer[size:]
+            self._data.append(data)
+            self._data.popleft()
 
             if chunk_size is None:
                 # Interpret data as chunk header
@@ -321,7 +325,12 @@ class SessionV1(object):
         # Unpack the message structure from the raw byte stream
         # (there should be only one)
         raw.seek(0)
-        signature, fields = next(unpack())
+        try:
+            signature, fields = next(unpack())
+        except:
+            from pprint import pprint
+            pprint(self._data)
+            raise
         raw.close()
 
         # Acknowledge any failures immediately
@@ -466,6 +475,9 @@ class Driver(object):
         s.sendall(data)
 
         # Handle the handshake response
+        ready_to_read, _, _ = select((s,), (), (), 0)
+        while not ready_to_read:
+            ready_to_read, _, _ = select((s,), (), (), 0)
         data = s.recv(4)
         if __debug__: log_debug("S: %r", data)
         agreed_version, = struct_unpack(">I", data)
